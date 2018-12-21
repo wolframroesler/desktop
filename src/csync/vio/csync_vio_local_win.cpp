@@ -35,6 +35,9 @@
 
 #include "vio/csync_vio_local.h"
 
+//TODO
+#include<QFileInfo>
+
 Q_LOGGING_CATEGORY(lcCSyncVIOLocal, "sync.csync.vio_local", QtInfoMsg)
 
 /*
@@ -237,53 +240,63 @@ std::unique_ptr<csync_file_stat_t> csync_vio_local_readfile(csync_vio_handle_t *
         }
     }
     auto path = c_utf8_from_locale(handle->ffd.cFileName);
-    if (path != key) {
-        return csync_vio_local_readfile(dhandle, uri, key);
-    } 
 
-    file_stat.reset(new csync_file_stat_t);
-    file_stat->path = path;
+	//TODO
+	QString fileKey = QFileInfo(key).fileName();
 
-    if (handle->ffd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) {
-        // Detect symlinks, and treat junctions as symlinks too.
-        if (handle->ffd.dwReserved0 == IO_REPARSE_TAG_SYMLINK
-            || handle->ffd.dwReserved0 == IO_REPARSE_TAG_MOUNT_POINT) {
-            file_stat->type = ItemTypeSoftLink;
+	qDebug() << "*** KEY: " << fileKey;
+    qDebug() << "!!! PATH: " << path.data();
+
+    if (path != fileKey) {
+        csync_vio_local_readfile(dhandle, uri, key);
+    } else {
+        file_stat.reset(new csync_file_stat_t);
+        file_stat->path = path;
+
+        if (handle->ffd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) {
+            // Detect symlinks, and treat junctions as symlinks too.
+            if (handle->ffd.dwReserved0 == IO_REPARSE_TAG_SYMLINK
+                || handle->ffd.dwReserved0 == IO_REPARSE_TAG_MOUNT_POINT) {
+                file_stat->type = ItemTypeSoftLink;
+            } else {
+                // The SIS and DEDUP reparse points should be treated as
+                // regular files. We don't know about the other ones yet,
+                // but will also treat them normally for now.
+                file_stat->type = ItemTypeFile;
+            }
+        } else if (handle->ffd.dwFileAttributes & FILE_ATTRIBUTE_DEVICE
+            || handle->ffd.dwFileAttributes & FILE_ATTRIBUTE_OFFLINE
+            || handle->ffd.dwFileAttributes & FILE_ATTRIBUTE_TEMPORARY) {
+            file_stat->type = ItemTypeSkip;
+        } else if (handle->ffd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+            file_stat->type = ItemTypeDirectory;
         } else {
-            // The SIS and DEDUP reparse points should be treated as
-            // regular files. We don't know about the other ones yet,
-            // but will also treat them normally for now.
             file_stat->type = ItemTypeFile;
         }
-    } else if (handle->ffd.dwFileAttributes & FILE_ATTRIBUTE_DEVICE
-        || handle->ffd.dwFileAttributes & FILE_ATTRIBUTE_OFFLINE
-        || handle->ffd.dwFileAttributes & FILE_ATTRIBUTE_TEMPORARY) {
-        file_stat->type = ItemTypeSkip;
-    } else if (handle->ffd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
-        file_stat->type = ItemTypeDirectory;
-    } else {
-        file_stat->type = ItemTypeFile;
+
+        /* Check for the hidden flag */
+        if (handle->ffd.dwFileAttributes & FILE_ATTRIBUTE_HIDDEN) {
+            file_stat->is_hidden = true;
+        }
+
+        file_stat->size = (handle->ffd.nFileSizeHigh * ((int64_t)(MAXDWORD) + 1)) + handle->ffd.nFileSizeLow;
+        file_stat->modtime = FileTimeToUnixTime(&handle->ffd.ftLastWriteTime, &rem);
+
+        std::wstring fullPath;
+        fullPath.reserve(std::wcslen(handle->path) + std::wcslen(handle->ffd.cFileName));
+        fullPath += handle->path; // path always ends with '\', by construction
+        fullPath += handle->ffd.cFileName;
+
+        if (_csync_vio_local_stat_mb(fullPath.data(), file_stat.get()) < 0) {
+            // Will get excluded by _csync_detect_update.
+            file_stat->type = ItemTypeSkip;
+        }
+
+        
     }
 
-    /* Check for the hidden flag */
-    if (handle->ffd.dwFileAttributes & FILE_ATTRIBUTE_HIDDEN) {
-        file_stat->is_hidden = true;
-    }
+	return file_stat;
 
-    file_stat->size = (handle->ffd.nFileSizeHigh * ((int64_t)(MAXDWORD) + 1)) + handle->ffd.nFileSizeLow;
-    file_stat->modtime = FileTimeToUnixTime(&handle->ffd.ftLastWriteTime, &rem);
-
-    std::wstring fullPath;
-    fullPath.reserve(std::wcslen(handle->path) + std::wcslen(handle->ffd.cFileName));
-    fullPath += handle->path; // path always ends with '\', by construction
-    fullPath += handle->ffd.cFileName;
-
-    if (_csync_vio_local_stat_mb(fullPath.data(), file_stat.get()) < 0) {
-        // Will get excluded by _csync_detect_update.
-        file_stat->type = ItemTypeSkip;
-    }
-
-    return file_stat;
 }
 
 

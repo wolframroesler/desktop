@@ -936,7 +936,7 @@ void Folder::slotItemCompleted(const SyncFileItemPtr &item)
 //            qCDebug(lcFolder) << "local discovery: wiped" << item->_file;
     } else {
         //_localDiscoveryPaths.insert(item->_file.toUtf8());
-        updateLocalFileTree(item->_file, item->_instruction);
+        //updateLocalFileTree(item->_file, item->_instruction);
         qCDebug(lcFolder) << "local discovery: inserted" << item->_file << "due to sync failure";
     }
 
